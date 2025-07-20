@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  nyx:
+    build: .
+    container_name: nyx-container
+    environment:
+      - PYTHONPATH=/app
+      - DATABASE_URL=${DATABASE_URL}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - .:/app  # Mount project directory
+    network_mode: "host"  # Access host database
+    stdin_open: true
+    tty: true
+    working_dir: /app
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '1.0'
+          memory: 2G
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:noexec,nosuid,size=100m
+    
+  # Optional: Run PostgreSQL in container if needed (use --profile database)
+  postgres:
+    image: postgres:15
+    container_name: nyx-postgres
+    environment:
+      - POSTGRES_DB=${DATABASE_NAME:-nyx}
+      - POSTGRES_USER=${DATABASE_USER}
+      - POSTGRES_PASSWORD=${DATABASE_PASSWORD}
+    ports:
+      - "5433:5432"  # Different port to avoid conflicts with host PostgreSQL
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    profiles:
+      - database  # Only start with --profile database
+
+volumes:
+  postgres_data:
