@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Integer, Text, Boolean, DECIMAL, DateTime, ForeignKey, Index, CheckConstraint
+from sqlalchemy import Column, String, Integer, Text, Boolean, DECIMAL, DateTime, ForeignKey, Index, CheckConstraint, Float
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
@@ -293,4 +293,93 @@ class AgentCommunication(Base):
         Index("idx_agent_communications_receiver", "receiver_agent_id"),
         Index("idx_agent_communications_thought_tree", "thought_tree_id"),
         Index("idx_agent_communications_sent_at", "sent_at"),
+    )
+
+class MotivationalState(Base):
+    __tablename__ = "motivational_states"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    motivation_type = Column(String(50), nullable=False)
+    urgency = Column(Float, nullable=False, default=0.0)
+    satisfaction = Column(Float, nullable=False, default=0.0)
+    decay_rate = Column(Float, nullable=False, default=0.02)
+    boost_factor = Column(Float, nullable=False, default=1.0)
+    
+    # Trigger conditions and metadata
+    trigger_condition = Column(JSONB, nullable=False, default={})
+    metadata_ = Column("metadata", JSONB, default={})
+    
+    # Timing
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    last_triggered_at = Column(DateTime(timezone=True), nullable=True)
+    last_satisfied_at = Column(DateTime(timezone=True), nullable=True)
+    
+    # Status and control
+    is_active = Column(Boolean, default=True)
+    max_urgency = Column(Float, default=1.0)
+    min_satisfaction = Column(Float, default=0.0)
+    
+    # Reinforcement learning metrics
+    success_count = Column(Integer, default=0)
+    failure_count = Column(Integer, default=0)
+    total_attempts = Column(Integer, default=0)
+    success_rate = Column(Float, default=0.0)
+    
+    __table_args__ = (
+        CheckConstraint("urgency >= 0.0 AND urgency <= 1.0", 
+                       name="check_motivational_states_urgency_range"),
+        CheckConstraint("satisfaction >= 0.0 AND satisfaction <= 1.0", 
+                       name="check_motivational_states_satisfaction_range"),
+        CheckConstraint("decay_rate >= 0.0 AND decay_rate <= 1.0", 
+                       name="check_motivational_states_decay_rate_range"),
+        CheckConstraint("success_rate >= 0.0 AND success_rate <= 1.0", 
+                       name="check_motivational_states_success_rate_range"),
+        Index("idx_motivational_states_type", "motivation_type"),
+        Index("idx_motivational_states_urgency", "urgency"),
+        Index("idx_motivational_states_satisfaction", "satisfaction"),
+        Index("idx_motivational_states_active", "is_active"),
+        Index("idx_motivational_states_last_triggered", "last_triggered_at"),
+    )
+
+class MotivationalTask(Base):
+    __tablename__ = "motivational_tasks"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    motivational_state_id = Column(UUID(as_uuid=True), ForeignKey("motivational_states.id"), nullable=False)
+    thought_tree_id = Column(UUID(as_uuid=True), ForeignKey("thought_trees.id"), nullable=True)
+    
+    # Task details
+    generated_prompt = Column(Text, nullable=False)
+    task_priority = Column(Float, nullable=False, default=0.5)
+    arbitration_score = Column(Float, nullable=False, default=0.0)
+    
+    # Status tracking
+    status = Column(String(20), nullable=False, default="generated")
+    spawned_at = Column(DateTime(timezone=True), server_default=func.now())
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    
+    # Outcome metrics
+    success = Column(Boolean, nullable=True)
+    outcome_score = Column(Float, nullable=True)
+    satisfaction_gain = Column(Float, nullable=True)
+    
+    # Context and metadata
+    context = Column(JSONB, default={})
+    
+    # Relationships
+    motivational_state = relationship("MotivationalState")
+    thought_tree = relationship("ThoughtTree")
+    
+    __table_args__ = (
+        CheckConstraint("status IN ('generated', 'queued', 'spawned', 'active', 'completed', 'failed', 'cancelled')", 
+                       name="check_motivational_tasks_status"),
+        CheckConstraint("task_priority >= 0.0 AND task_priority <= 1.0", 
+                       name="check_motivational_tasks_priority_range"),
+        Index("idx_motivational_tasks_state_id", "motivational_state_id"),
+        Index("idx_motivational_tasks_thought_tree_id", "thought_tree_id"),
+        Index("idx_motivational_tasks_status", "status"),
+        Index("idx_motivational_tasks_priority", "task_priority"),
+        Index("idx_motivational_tasks_spawned_at", "spawned_at"),
     )

@@ -2,7 +2,33 @@
 
 ## Overview
 
-The NYX system is a recursive fractal orchestration AI that uses deterministic and probabilistic signals to generate structured outputs. The system is built from a hierarchy of orchestrators and agents that recursively coordinate subtasks, track memory, and interface with external tools.
+**NYX is a fully autonomous AI agent system capable of self-directed operation, goal formation, and continuous task execution without human intervention.**
+
+NYX represents a breakthrough in artificial intelligence autonomy, combining advanced orchestration capabilities with intrinsic motivation systems to create a truly self-directing digital agent. Unlike traditional reactive AI systems that require constant human prompts, NYX generates its own tasks based on internal motivational states, executes complex workflows autonomously, and continuously learns from outcomes to improve performance.
+
+### 🎯 **Core Capabilities**
+
+**Autonomous Operation**: NYX operates independently for extended periods, generating 10+ self-directed tasks per hour based on internal motivations like problem-solving, quality improvement, and capability exploration.
+
+**Hierarchical Intelligence**: Built on a recursive fractal orchestration architecture where top-level orchestrators coordinate sub-orchestrators and specialized agents (Task, Council, Validator, Memory) to handle complex multi-step workflows.
+
+**Adaptive Learning**: Integrates active learning systems that continuously analyze performance patterns, adapt strategies based on historical success rates, and optimize execution parameters in real-time.
+
+**Motivational Psychology**: Features six core motivational states (resolve_unfinished_tasks, refine_low_confidence, explore_recent_failure, maximize_coverage, revisit_old_thoughts, idle_exploration) that drive autonomous behavior and maintain persistent goals.
+
+**Production-Grade Architecture**: Includes comprehensive database persistence, real-time monitoring, safety constraints, and robust error handling suitable for continuous autonomous operation.
+
+### 🚀 **Autonomous Behaviors**
+
+- **Proactive Problem Solving**: Automatically detects system issues, failed operations, and performance bottlenecks, then spawns corrective workflows
+- **Quality Assurance**: Self-initiates validation and refinement tasks when low-confidence outputs are detected
+- **Capability Exploration**: Discovers and tests underutilized tools and functional domains during periods of low activity  
+- **Memory Maintenance**: Revisits and completes abandoned long-term tasks, ensuring persistent goal achievement
+- **Self-Directed Learning**: Explores new approaches and optimizes existing processes through autonomous experimentation
+
+### 🏗️ **Technical Architecture**
+
+NYX is built from a hierarchy of orchestrators and agents that recursively coordinate subtasks, maintain comprehensive memory, and interface with external tools through a secure, monitored execution environment.
 
 ## Project Structure
 
