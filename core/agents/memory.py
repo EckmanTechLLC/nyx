@@ -339,8 +339,12 @@ class MemoryAgent(BaseAgent):
             )
     
     async def _handle_summarize_memory(self, input_data: Dict[str, Any]) -> AgentResult:
-        """Summarize memories using LLM"""
+        """Summarize memories using LLM or synthesize provided content"""
         try:
+            # Check if this is a content synthesis operation (from orchestrator)
+            if 'content_pieces' in input_data and 'operation_type' in input_data:
+                return await self._handle_content_synthesis(input_data)
+            
             # Get memories to summarize
             scope = input_data.get('scope', 'thought_tree')
             memory_types = input_data.get('memory_types', ['context', 'decision', 'learning'])
@@ -617,3 +621,128 @@ Structure the summary for clarity and actionability."""
         }
         
         return {**base_stats, **memory_stats}
+    
+    async def _handle_content_synthesis(self, input_data: Dict[str, Any]) -> AgentResult:
+        """Handle content synthesis operations from orchestrator"""
+        try:
+            content_pieces = input_data.get('content_pieces', [])
+            operation_type = input_data.get('operation_type', 'context_synthesis')
+            synthesis_focus = input_data.get('synthesis_focus', 'workflow_completion')
+            target_scope = input_data.get('target_scope', 'workflow')
+            
+            if not content_pieces:
+                return AgentResult(
+                    success=True,
+                    content="No content provided for synthesis.",
+                    metadata={'synthesis_focus': synthesis_focus, 'content_pieces_count': 0}
+                )
+            
+            # Prepare content for synthesis
+            formatted_content = []
+            for i, content in enumerate(content_pieces):
+                if content and content.strip():
+                    formatted_content.append(f"Section {i+1}: {content.strip()}")
+            
+            if not formatted_content:
+                return AgentResult(
+                    success=True,
+                    content="All provided content was empty.",
+                    metadata={'synthesis_focus': synthesis_focus, 'valid_content_pieces': 0}
+                )
+            
+            # Generate synthesis prompt based on operation type
+            if operation_type == 'context_synthesis':
+                if synthesis_focus == 'sequential_workflow_completion':
+                    system_prompt = """You are an expert content synthesizer specializing in creating comprehensive summaries from sequential workflow results.
+                    
+Your task is to combine multiple workflow results into a cohesive, well-structured response that addresses the original user request."""
+                    
+                    user_prompt = f"""Synthesize the following sequential workflow results into a comprehensive response:
+
+{chr(10).join(formatted_content)}
+
+Please create a well-structured, cohesive response that:
+1. Combines all relevant information from the sections
+2. Maintains logical flow and organization
+3. Addresses the original request comprehensively
+4. Eliminates redundancy while preserving important details
+
+Focus: {synthesis_focus}
+Target Scope: {target_scope}"""
+                
+                elif synthesis_focus == 'parallel_workflow_aggregation':
+                    system_prompt = """You are an expert content synthesizer specializing in aggregating parallel workflow results.
+                    
+Your task is to combine multiple parallel workflow results into a unified, comprehensive response."""
+                    
+                    user_prompt = f"""Aggregate the following parallel workflow results into a unified response:
+
+{chr(10).join(formatted_content)}
+
+Please create a comprehensive response that:
+1. Integrates information from all parallel results
+2. Organizes content logically by topic or importance
+3. Identifies and resolves any conflicts or contradictions
+4. Provides a complete answer to the original request
+
+Focus: {synthesis_focus}
+Target Scope: {target_scope}"""
+                
+                else:
+                    # Generic synthesis
+                    system_prompt = """You are an expert content synthesizer. Your task is to combine multiple pieces of content into a coherent, comprehensive response."""
+                    
+                    user_prompt = f"""Synthesize the following content pieces:
+
+{chr(10).join(formatted_content)}
+
+Create a well-organized, comprehensive response that combines all relevant information."""
+            
+            else:
+                # Default synthesis approach
+                system_prompt = "You are a content synthesizer. Combine the provided content into a coherent response."
+                user_prompt = f"Synthesize this content:\n\n{chr(10).join(formatted_content)}"
+            
+            # Call LLM for synthesis
+            llm_result = await self._call_llm(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                max_tokens=input_data.get('max_tokens', 2048),
+                temperature=0.3
+            )
+            
+            if llm_result.success:
+                return AgentResult(
+                    success=True,
+                    content=llm_result.content,
+                    tokens_used=llm_result.tokens_used,
+                    cost_usd=llm_result.cost_usd,
+                    metadata={
+                        'operation_type': operation_type,
+                        'synthesis_focus': synthesis_focus,
+                        'content_pieces_synthesized': len(formatted_content),
+                        'synthesis_method': 'llm_based'
+                    }
+                )
+            else:
+                # Fallback to simple concatenation
+                fallback_content = f"Synthesis Results:\n\n" + "\n\n".join(formatted_content)
+                return AgentResult(
+                    success=True,
+                    content=fallback_content,
+                    metadata={
+                        'operation_type': operation_type,
+                        'synthesis_focus': synthesis_focus,
+                        'content_pieces_synthesized': len(formatted_content),
+                        'synthesis_method': 'fallback_concatenation',
+                        'llm_error': llm_result.error_message
+                    }
+                )
+                
+        except Exception as e:
+            logger.error(f"MemoryAgent {self.id} content synthesis error: {str(e)}")
+            return AgentResult(
+                success=False,
+                content="",
+                error_message=f"Content synthesis failed: {str(e)}"
+            )

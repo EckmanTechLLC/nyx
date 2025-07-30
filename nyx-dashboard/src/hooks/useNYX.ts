@@ -40,7 +40,7 @@ export function useSystemStatus() {
   return useQuery({
     queryKey: queryKeys.systemStatus,
     queryFn: () => nyxAPI.getSystemStatus(),
-    refetchInterval: 5000, // 5 seconds
+    refetchInterval: 30000, // 30 seconds
     retry: 2
   })
 }
@@ -59,7 +59,7 @@ export function useEngineStatus() {
   return useQuery({
     queryKey: queryKeys.engineStatus,
     queryFn: () => nyxAPI.getEngineStatus(),
-    refetchInterval: 2000, // 2 seconds
+    refetchInterval: 30000, // 30 seconds
     retry: 2
   })
 }
@@ -93,7 +93,7 @@ export function useMotivationalStates() {
   return useQuery({
     queryKey: queryKeys.motivationalStates,
     queryFn: () => nyxAPI.getMotivationalStates(),
-    refetchInterval: 3000, // 3 seconds
+    refetchInterval: 15000, // 15 seconds
     retry: 2
   })
 }
@@ -102,7 +102,7 @@ export function useMotivationalState(motivationType: string) {
   return useQuery({
     queryKey: queryKeys.motivationalState(motivationType),
     queryFn: () => nyxAPI.getMotivationalState(motivationType),
-    refetchInterval: 5000,
+    refetchInterval: 30000, // 30 seconds
     retry: 2,
     enabled: !!motivationType
   })
@@ -126,7 +126,7 @@ export function useRecentTasks(limit: number = 10) {
   return useQuery({
     queryKey: queryKeys.recentTasks(limit),
     queryFn: () => nyxAPI.getRecentTasks(limit),
-    refetchInterval: 2000, // 2 seconds
+    refetchInterval: 20000, // 20 seconds
     retry: 2
   })
 }
@@ -135,7 +135,7 @@ export function useIntegrationStatus() {
   return useQuery({
     queryKey: queryKeys.integrationStatus,
     queryFn: () => nyxAPI.getIntegrationStatus(),
-    refetchInterval: 5000, // 5 seconds
+    refetchInterval: 30000, // 30 seconds
     retry: 2
   })
 }
@@ -156,7 +156,7 @@ export function useActiveWorkflows(limit: number = 10, offset: number = 0) {
   return useQuery({
     queryKey: queryKeys.activeWorkflows(limit, offset),
     queryFn: () => nyxAPI.getActiveWorkflows(limit, offset),
-    refetchInterval: 5000, // 5 seconds
+    refetchInterval: 20000, // 20 seconds
     retry: 2
   })
 }
@@ -165,7 +165,7 @@ export function useWorkflowStatus(workflowId: string) {
   return useQuery({
     queryKey: queryKeys.workflowStatus(workflowId),
     queryFn: () => nyxAPI.getWorkflowStatus(workflowId),
-    refetchInterval: 2000, // 2 seconds
+    refetchInterval: 10000, // 10 seconds
     retry: 2,
     enabled: !!workflowId
   })

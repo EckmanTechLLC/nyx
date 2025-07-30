@@ -120,7 +120,8 @@ async def get_system_status(db: AsyncSession = Depends(get_db)) -> Dict[str, Any
         # Database statistics
         try:
             # Basic database connection test
-            result = await db.execute("SELECT 1 as test")
+            from sqlalchemy import text
+            result = await db.execute(text("SELECT 1 as test"))
             test_result = result.scalar()
             
             status_info["database"] = {

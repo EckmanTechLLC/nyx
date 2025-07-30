@@ -95,6 +95,11 @@ class NYXAPIClient {
     return response.data
   }
 
+  async updateEngineConfig(config: EngineConfig): Promise<{ success: boolean; message?: string }> {
+    const response = await this.client.put('/api/v1/motivational/engine/config', config)
+    return response.data
+  }
+
   // Motivational System
   async getMotivationalStates(): Promise<MotivationalStates> {
     const response = await this.client.get<MotivationalStates>('/api/v1/motivational/states')
@@ -139,12 +144,12 @@ class NYXAPIClient {
 
   async getWorkflowStrategies(): Promise<string[]> {
     const response = await this.client.get('/api/v1/orchestrator/strategies')
-    return response.data
+    return response.data.strategies ? Object.keys(response.data.strategies) : []
   }
 
   async getInputTypes(): Promise<string[]> {
     const response = await this.client.get('/api/v1/orchestrator/input-types')
-    return response.data
+    return response.data.input_types ? Object.keys(response.data.input_types) : []
   }
 
   // Connection Testing

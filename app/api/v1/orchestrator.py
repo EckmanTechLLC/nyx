@@ -116,6 +116,13 @@ async def execute_workflow(
         # Create TopLevelOrchestrator instance with database session
         orchestrator = TopLevelOrchestrator(db)
         
+        # Initialize orchestrator (creates thought tree and sets up database state)
+        if not await orchestrator.initialize():
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to initialize orchestrator"
+            )
+        
         # Create WorkflowInput using verified dataclass structure
         workflow_input = WorkflowInput(
             input_type=workflow_input_type,
@@ -133,14 +140,14 @@ async def execute_workflow(
         result = await orchestrator.execute_workflow(workflow_input)
         execution_time = (datetime.utcnow() - start_time).total_seconds() * 1000
         
-        # Create response using verified OrchestratorResult attributes
+        # Create response using correct OrchestratorResult attributes
         response = WorkflowResponse(
             success=result.success,
-            content=result.content,
+            content=result.final_output.get('content', '') if result.final_output else '',
             metadata=result.metadata,
             execution_time_ms=int(execution_time),
-            cost_usd=float(result.cost_usd) if result.cost_usd else 0.0,
-            workflow_id=result.metadata.get('workflow_id') if result.metadata else None,
+            cost_usd=float(result.total_cost_usd) if result.total_cost_usd else 0.0,
+            workflow_id=result.workflow_id,
             timestamp=datetime.utcnow().isoformat()
         )
         

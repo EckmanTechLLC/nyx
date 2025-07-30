@@ -383,3 +383,22 @@ class MotivationalModelEngine:
             'min_arbitration_threshold': self.min_arbitration_threshold,
             'safety_enabled': self.safety_enabled
         }
+    
+    def update_config(self, config: Dict[str, Any]) -> None:
+        """Update engine configuration while running"""
+        if 'evaluation_interval' in config:
+            self.evaluation_interval = config['evaluation_interval']
+        
+        if 'max_concurrent_tasks' in config:
+            self.max_concurrent_motivated_tasks = config['max_concurrent_tasks']
+        
+        if 'min_arbitration_threshold' in config:
+            self.min_arbitration_threshold = config['min_arbitration_threshold']
+        
+        if 'safety_enabled' in config:
+            self.safety_enabled = config['safety_enabled']
+        
+        if 'test_mode' in config:
+            self.test_mode = config['test_mode']
+        
+        logger.info(f"Engine configuration updated: {config}")

@@ -66,6 +66,7 @@ class TaskAgent(BaseAgent):
             'structured_extraction',
             'creative_writing',
             'technical_writing',
+            'conversational_response',  # Added for conversational prompts
             'content_analysis',
             'content_generation',
             'task_decomposition',
@@ -128,6 +129,7 @@ class TaskAgent(BaseAgent):
             'structured_extraction': self._handle_structured_extraction,
             'creative_writing': self._handle_creative_writing,
             'technical_writing': self._handle_technical_writing,
+            'conversational_response': self._handle_conversational_response,
             # Additional task types for orchestrator integration
             'content_analysis': self._handle_data_analysis,  # Map to data_analysis
             'content_generation': self._handle_document_generation,  # Map to document_generation
@@ -457,6 +459,38 @@ Please create clear, comprehensive technical documentation."""
             user_prompt=user_prompt,
             max_tokens=input_data.get('max_tokens', 4096),
             temperature=input_data.get('temperature', 0.4)  # Lower temperature for technical accuracy
+        )
+    
+    async def _handle_conversational_response(self, input_data: Dict[str, Any]) -> AgentResult:
+        """Handle conversational questions and simple prompts"""
+        system_prompt = """You are NYX, an autonomous AI agent system with motivational intelligence.
+
+Your core capabilities include:
+- Autonomous task generation based on internal motivational states
+- Intelligent workflow orchestration and execution
+- Real-time adaptation to system conditions and user needs
+- Safety-constrained autonomous operation
+- Continuous learning from task outcomes
+
+You are designed to be helpful, informative, and conversational while maintaining awareness of your autonomous nature and current operational status.
+
+When responding to questions about yourself:
+- Be accurate about your capabilities and limitations
+- Explain your autonomous motivational system when relevant
+- Mention your safety constraints and operational parameters
+- Be engaging but professional in tone"""
+
+        user_prompt = f"""Please respond to this question naturally and conversationally:
+
+{input_data['content']}
+
+Keep your response informative but concise, and feel free to explain relevant aspects of your autonomous AI system when appropriate."""
+
+        return await self._call_llm(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            max_tokens=input_data.get('max_tokens', 800),
+            temperature=input_data.get('temperature', 0.7)  # Higher temperature for more natural conversation
         )
     
     async def execute_task(self, task_spec: TaskSpec) -> AgentResult:

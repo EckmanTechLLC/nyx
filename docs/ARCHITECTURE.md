@@ -366,7 +366,7 @@ TaskAgent("Write comprehensive API documentation")
 
 - **API Framework**: FastAPI
 - **LLM Integration**: Anthropic Python SDK
-- **Database**: PostgreSQL (192.168.50.10) ✅ Operational
+- **Database**: PostgreSQL ✅ Operational
 - **ORM**: SQLAlchemy ✅ Complete with all models
 - **Concurrency**: asyncio with shared database state
 - **Configuration**: Environment variables for secrets, database for templates/schemas ✅

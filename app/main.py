@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Dict, Any
 
 from .core.exceptions import NYXAPIException, nyx_exception_handler
+from .middleware.auth import APIKeyMiddleware
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -55,11 +56,19 @@ app = FastAPI(
 # CORS middleware configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:8080"],  # Configure for production
+    allow_origins=[
+        "http://localhost:3000", 
+        "http://localhost:8080",
+        "http://127.0.0.1:3000"
+    ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+# Add API Key authentication middleware
+api_auth_middleware = APIKeyMiddleware()
+app.middleware("http")(api_auth_middleware)
 
 # Exception handlers
 app.add_exception_handler(NYXAPIException, nyx_exception_handler)

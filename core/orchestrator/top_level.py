@@ -144,6 +144,7 @@ class TopLevelOrchestrator(BaseOrchestrator):
     
     def __init__(
         self,
+        db_session=None,
         max_concurrent_agents: int = 20,
         max_execution_time_minutes: int = 120,
         max_cost_usd: float = 100.0,
@@ -160,6 +161,7 @@ class TopLevelOrchestrator(BaseOrchestrator):
         )
         
         # Store constructor parameters as instance attributes
+        self.db_session = db_session
         self.max_execution_time_minutes = max_execution_time_minutes
         self.max_cost_usd = max_cost_usd
         self.max_recursion_depth = max_recursion_depth
@@ -264,12 +266,39 @@ class TopLevelOrchestrator(BaseOrchestrator):
             if workflow_input.input_type == WorkflowInputType.GOAL_WORKFLOW:
                 complexity.cognitive_complexity = ComplexityLevel.HIGH
             elif workflow_input.input_type == WorkflowInputType.USER_PROMPT:
-                # For USER_PROMPT, content is a string, not a dict
-                prompt_text = content if isinstance(content, str) else content.get("content", "")
-                if len(prompt_text.split()) <= 5 and any(
-                    prompt_text.lower().startswith(prefix) 
-                    for prefix in ["what is", "who is", "what does", "how to", "define", "explain"]
-                ):
+                # For USER_PROMPT, content can be a string or dict with 'prompt' or 'content' key
+                if isinstance(content, str):
+                    prompt_text = content
+                elif isinstance(content, dict):
+                    # Try 'prompt' key first (from frontend), then 'content' key
+                    prompt_text = content.get("prompt", content.get("content", ""))
+                else:
+                    prompt_text = str(content)
+                
+                # Improved conversational prompt detection
+                conversational_indicators = [
+                    "what is", "who is", "what does", "how to", "define", "explain",
+                    "what are you", "who are you", "tell me about", "describe yourself",
+                    "how do you work", "what can you do", "explain your", "what is your",
+                    "how are you", "introduce yourself", "what do you know about",
+                    "have you learned", "do you know", "can you tell me", "what have you",
+                    "do you understand", "are you aware", "have you experienced"
+                ]
+                
+                document_indicators = [
+                    "write a", "create a", "generate a", "draft a", "compose a", 
+                    "make a document", "prepare a report", "format", "structure",
+                    "comprehensive", "detailed analysis", "full report"
+                ]
+                
+                prompt_lower = prompt_text.lower()
+                is_conversational = any(indicator in prompt_lower for indicator in conversational_indicators)
+                is_document_request = any(indicator in prompt_lower for indicator in document_indicators)
+                
+                if is_conversational and not is_document_request:
+                    complexity.cognitive_complexity = ComplexityLevel.LOW
+                elif len(prompt_text.split()) <= 8 and not is_document_request:
+                    # Short prompts that aren't document requests are likely conversational
                     complexity.cognitive_complexity = ComplexityLevel.LOW
                 else:
                     # Analyze prompt complexity using LLM for more complex prompts
@@ -787,7 +816,15 @@ class TopLevelOrchestrator(BaseOrchestrator):
         elif workflow_input.input_type == WorkflowInputType.STRUCTURED_TASK:
             return content.get('task_definition', {}).get('primary_objective', 'Structured Task')
         elif workflow_input.input_type == WorkflowInputType.USER_PROMPT:
-            prompt_text = content.get('content', 'User Request')
+            # Extract prompt text (handle both string and dict formats)
+            if isinstance(content, str):
+                prompt_text = content
+            elif isinstance(content, dict):
+                # Try 'prompt' key first (from frontend), then 'content' key
+                prompt_text = content.get('prompt', content.get('content', 'User Request'))
+            else:
+                prompt_text = str(content)
+            
             # Truncate long prompts for title
             return prompt_text[:100] + "..." if len(prompt_text) > 100 else prompt_text
         else:
@@ -811,6 +848,15 @@ class TopLevelOrchestrator(BaseOrchestrator):
             if 'constraints' in task_def:
                 description += f"\nConstraints: {'; '.join(task_def['constraints'])}"
             return description
+        elif workflow_input.input_type == WorkflowInputType.USER_PROMPT:
+            # Extract prompt text (handle both string and dict formats)
+            if isinstance(content, str):
+                return content
+            elif isinstance(content, dict):
+                # Try 'prompt' key first (from frontend), then 'content' key
+                return content.get('prompt', content.get('content', str(content)))
+            else:
+                return str(content)
         else:
             return str(content)
     
@@ -936,12 +982,48 @@ class TopLevelOrchestrator(BaseOrchestrator):
     async def _convert_to_task_input(self, workflow_input: WorkflowInput) -> Dict[str, Any]:
         """Convert workflow input to task agent input format"""
         if workflow_input.input_type == WorkflowInputType.USER_PROMPT:
-            return {
-                'task_type': 'document_generation',
-                'description': 'User request fulfillment',
-                'content': workflow_input.content.get('content', ''),
-                'max_tokens': 1000
-            }
+            # Extract prompt text from content (handle both string and dict formats)
+            if isinstance(workflow_input.content, str):
+                prompt_text = workflow_input.content
+            elif isinstance(workflow_input.content, dict):
+                # Try 'prompt' key first (from frontend), then 'content' key
+                prompt_text = workflow_input.content.get('prompt', workflow_input.content.get('content', ''))
+            else:
+                prompt_text = str(workflow_input.content)
+            
+            # Determine if this is a conversational prompt or document generation request
+            conversational_indicators = [
+                "tell me about", "what are you", "who are you", "describe yourself",
+                "how do you work", "what can you do", "explain your", "what is your",
+                "how are you", "introduce yourself", "what do you know about",
+                "have you learned", "do you know", "can you tell me", "what have you",
+                "do you understand", "are you aware", "have you experienced"
+            ]
+            
+            document_indicators = [
+                "write a", "create a", "generate a", "draft a", "compose a", 
+                "make a document", "prepare a report", "format", "structure"
+            ]
+            
+            prompt_lower = prompt_text.lower()
+            is_conversational = any(indicator in prompt_lower for indicator in conversational_indicators)
+            is_document_request = any(indicator in prompt_lower for indicator in document_indicators)
+            
+            # Route to appropriate task type
+            if is_conversational and not is_document_request:
+                return {
+                    'task_type': 'conversational_response',
+                    'description': 'Conversational question answering',
+                    'content': prompt_text,
+                    'max_tokens': 800
+                }
+            else:
+                return {
+                    'task_type': 'document_generation',
+                    'description': 'User request fulfillment',
+                    'content': prompt_text,
+                    'max_tokens': 1000
+                }
         elif workflow_input.input_type == WorkflowInputType.STRUCTURED_TASK:
             task_def = workflow_input.content.get('task_definition', {})
             return {

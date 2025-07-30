@@ -88,7 +88,7 @@ services:
     environment:
       - POSTGRES_DB=nyx
       - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=Aim33IsReal!
+      - POSTGRES_PASSWORD=${DATABASE_PASSWORD}
     ports:
       - "5433:5432"  # Different port to avoid conflicts
     volumes:
@@ -104,7 +104,7 @@ volumes:
 
 ```env
 # Database Configuration
-DATABASE_URL=postgresql://postgres:Aim33IsReal!@192.168.50.10:5432/nyx
+DATABASE_URL=postgresql://user:password@localhost:5432/nyx
 
 # API Keys
 ANTHROPIC_API_KEY=your_actual_anthropic_api_key_here
@@ -349,7 +349,7 @@ services:
 #### Database Connection Failed:
 ```bash
 # Check if PostgreSQL is accessible from container
-docker-compose run --rm nyx bash -c "nc -zv 192.168.50.10 5432"
+docker-compose run --rm nyx bash -c "nc -zv localhost 5432"
 ```
 
 #### Python Import Errors:

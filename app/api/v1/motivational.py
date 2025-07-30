@@ -208,6 +208,68 @@ async def stop_engine():
             }
         )
 
+@router.put("/engine/config")
+async def update_engine_config(config: EngineConfig):
+    """
+    Update the running engine's configuration.
+    
+    Updates the configuration of the currently running motivational engine.
+    If the engine is not running, returns an error.
+    
+    Args:
+        config: New engine configuration parameters
+        
+    Returns:
+        Dict containing updated configuration status
+        
+    Raises:
+        HTTPException: If engine is not running or update fails
+    """
+    global _engine_instance
+    
+    if not _engine_instance:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Engine not initialized. Start the engine first."
+        )
+    
+    if not _engine_instance.get_status()['running']:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Engine not running. Start the engine first."
+        )
+    
+    try:
+        # Update the engine configuration
+        _engine_instance.update_config({
+            'evaluation_interval': config.evaluation_interval,
+            'max_concurrent_tasks': config.max_concurrent_tasks,
+            'min_arbitration_threshold': config.min_arbitration_threshold,
+            'safety_enabled': config.safety_enabled,
+            'test_mode': config.test_mode
+        })
+        
+        # Get updated status to confirm changes
+        updated_status = _engine_instance.get_status()
+        
+        return {
+            "message": "Engine configuration updated successfully",
+            "config": {
+                "evaluation_interval": updated_status['evaluation_interval'],
+                "max_concurrent_tasks": updated_status['max_concurrent_tasks'],
+                "min_arbitration_threshold": updated_status['min_arbitration_threshold'],
+                "safety_enabled": updated_status['safety_enabled']
+            },
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to update engine configuration: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update engine configuration: {str(e)}"
+        )
+
 @router.get("/engine/status", response_model=EngineStatusResponse)
 async def get_engine_status():
     """
@@ -415,9 +477,11 @@ async def get_recent_motivational_tasks(
         from sqlalchemy import select, desc
         from database.models import MotivationalTask
         
-        # Query recent motivational tasks
+        # Query recent motivational tasks with motivational_state relationship
+        from sqlalchemy.orm import selectinload
         result = await db.execute(
             select(MotivationalTask)
+            .options(selectinload(MotivationalTask.motivational_state))
             .order_by(desc(MotivationalTask.spawned_at))
             .limit(limit)
         )
@@ -427,7 +491,7 @@ async def get_recent_motivational_tasks(
         task_list = [
             {
                 "task_id": str(task.id),
-                "motivation_type": task.motivation_type,
+                "motivation_type": task.motivational_state.motivation_type if task.motivational_state else "unknown",
                 "generated_prompt": task.generated_prompt[:200] + "..." if len(task.generated_prompt) > 200 else task.generated_prompt,
                 "status": task.status,
                 "task_priority": task.task_priority,
