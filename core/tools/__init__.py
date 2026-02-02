@@ -9,13 +9,15 @@ for file operations and shell command execution.
 from .base import BaseTool, ToolResult, ToolState
 from .file_ops import FileOperationsTool, FileOperationConfig
 from .shell import ShellCommandTool, ShellCommandConfig
+from .moltbook import MoltbookTool
 
 __all__ = [
     'BaseTool',
-    'ToolResult', 
+    'ToolResult',
     'ToolState',
     'FileOperationsTool',
     'FileOperationConfig',
     'ShellCommandTool',
-    'ShellCommandConfig'
+    'ShellCommandConfig',
+    'MoltbookTool'
 ]

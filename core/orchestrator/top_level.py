@@ -1034,13 +1034,25 @@ class TopLevelOrchestrator(BaseOrchestrator):
                 'max_tokens': 1200
             }
         elif workflow_input.input_type == WorkflowInputType.GOAL_WORKFLOW:
-            goal = workflow_input.content.get('goal', {})
-            return {
-                'task_type': 'goal_achievement',
-                'description': goal.get('objective', 'Goal achievement'),
-                'content': f"Objective: {goal.get('objective', '')}\nSuccess Criteria: {goal.get('success_criteria', [])}",
-                'max_tokens': 1500
-            }
+            # Handle both structured goal format and simple prompt format
+            if 'goal' in workflow_input.content:
+                # Structured format: {goal: {objective: ..., success_criteria: ...}}
+                goal = workflow_input.content.get('goal', {})
+                return {
+                    'task_type': 'goal_achievement',
+                    'description': goal.get('objective', 'Goal achievement'),
+                    'content': f"Objective: {goal.get('objective', '')}\nSuccess Criteria: {goal.get('success_criteria', [])}",
+                    'max_tokens': 1500
+                }
+            else:
+                # Simple format: {prompt: "..."}  (from dashboard)
+                prompt_text = workflow_input.content.get('prompt', str(workflow_input.content))
+                return {
+                    'task_type': 'goal_achievement',
+                    'description': 'Goal-oriented task execution',
+                    'content': prompt_text,
+                    'max_tokens': 1500
+                }
         else:
             # Generic conversion for other types
             return {
@@ -1099,7 +1111,7 @@ class TopLevelOrchestrator(BaseOrchestrator):
                 task_desc = line.split('.', 1)[-1].strip() if '.' in line else line
                 if len(task_desc) > 10:  # Reasonable minimum length
                     subtasks.append({
-                        'task_type': 'document_generation',
+                        'task_type': 'goal_achievement',
                         'description': task_desc,
                         'content': task_desc,
                         'max_tokens': 600

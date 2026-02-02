@@ -180,3 +180,37 @@ export interface UserSettings {
   theme: 'light' | 'dark'
   dashboardLayout: string[]
 }
+
+// Social Types
+export interface SocialPost {
+  id: string
+  title: string
+  content: string
+  url: string
+  created_at: string
+  engagement: {
+    upvotes: number
+    downvotes: number
+    comments: number
+  }
+}
+
+export interface SocialComment {
+  id: string
+  content: string
+  post_url: string
+  created_at: string
+  context: string
+  type: 'comment' | 'reply'
+}
+
+export interface SocialMetrics {
+  cycles_since_last_post: number
+  claims_corrected_since_last_post: number
+  posts_this_hour: number
+  max_posts_per_hour: number
+  last_post_time: string | null
+  total_posts: number
+  total_comments: number
+  timestamp: string
+}

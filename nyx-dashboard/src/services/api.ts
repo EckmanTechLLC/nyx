@@ -16,6 +16,9 @@ import {
   WorkflowResponse,
   WorkflowStatus,
   WorkflowSummary,
+  SocialPost,
+  SocialComment,
+  SocialMetrics,
   APIError
 } from '@/types/nyx'
 
@@ -28,7 +31,7 @@ class NYXAPIClient {
     console.log('NEXT_PUBLIC_API_URL env var:', process.env.NEXT_PUBLIC_API_URL)
     this.client = axios.create({
       baseURL,
-      timeout: 30000,
+      timeout: 300000, // 5 minutes for long-running workflows
       headers: {
         'Content-Type': 'application/json'
       }
@@ -150,6 +153,22 @@ class NYXAPIClient {
   async getInputTypes(): Promise<string[]> {
     const response = await this.client.get('/api/v1/orchestrator/input-types')
     return response.data.input_types ? Object.keys(response.data.input_types) : []
+  }
+
+  // Social Monitoring
+  async getSocialPosts(limit: number = 50): Promise<{ posts: SocialPost[]; total: number; timestamp: string }> {
+    const response = await this.client.get(`/api/v1/social/posts?limit=${limit}`)
+    return response.data
+  }
+
+  async getSocialComments(limit: number = 100): Promise<{ comments: SocialComment[]; total: number; timestamp: string }> {
+    const response = await this.client.get(`/api/v1/social/comments?limit=${limit}`)
+    return response.data
+  }
+
+  async getSocialMetrics(): Promise<SocialMetrics> {
+    const response = await this.client.get<SocialMetrics>('/api/v1/social/metrics')
+    return response.data
   }
 
   // Connection Testing

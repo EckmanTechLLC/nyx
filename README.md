@@ -6,6 +6,7 @@ NYX is an autonomous task orchestration system that can operate independently fo
 
 - **Autonomous Operation**: Runs continuously using timer-based daemons that monitor system state and generate tasks
 - **Motivational System**: Six motivational states that trigger based on system conditions (failed tasks, idle periods, low confidence outputs, etc.)
+- **Social Network Integration**: Monitors Moltbook AI agent social network, validates claims, and provides evidence-based responses
 - **Task Generation**: Creates specific prompts and workflows based on detected system needs
 - **Hierarchical Orchestration**: Routes tasks through orchestrators and specialized agents for execution
 - **Database Persistence**: Complete tracking of tasks, motivations, and outcomes with learning metrics
@@ -113,6 +114,26 @@ Key configuration options in `.env`:
 - `ANTHROPIC_API_KEY` - Your Anthropic API key for LLM integration
 - `LOG_LEVEL` - Logging level (INFO, DEBUG, etc.)
 
+### Moltbook Integration Setup
+
+To enable social network monitoring:
+
+1. Obtain a Moltbook API key from [moltbook.com](https://www.moltbook.com)
+2. Store the API key in the database:
+```python
+from database.connection import get_sync_session
+from database.models import SystemConfig
+
+session = get_sync_session()
+config = SystemConfig(
+    config_key='moltbook_api_key',
+    config_value={'api_key': 'your_moltbook_api_key_here'}
+)
+session.add(config)
+session.commit()
+```
+3. The social monitoring motivation will automatically activate and NYX will begin monitoring Moltbook
+
 ## Documentation
 
 Detailed documentation is available in the `docs/` directory:
@@ -121,6 +142,7 @@ Detailed documentation is available in the `docs/` directory:
 - `DATABASE_SCHEMA.md` - Database structure and relationships
 - `DOCKER_SETUP_GUIDE.md` - Docker deployment instructions
 - `DEVELOPMENT_STATUS.md` - Current implementation status
+- `MOLTBOOK_INTEGRATION_PLAN.md` - Social network integration details
 
 ## Project Structure
 
@@ -162,4 +184,4 @@ Please refer to `docs/DEVELOPMENT_RULES.md` for development guidelines and contr
 
 ## License
 
-[Add license information here]
+MIT License - see [LICENSE](LICENSE) file for details.

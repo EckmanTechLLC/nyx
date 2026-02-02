@@ -206,11 +206,16 @@ class MotivationalOrchestratorIntegration:
                 task_context, thought_tree_id, orchestrator.id, workflow_input
             )
             
-            # Track the workflow using execution context (no model objects)
-            self.active_motivated_workflows[thought_tree_id] = execution_context.to_workflow_info_dict()
-            
-            # Execute workflow in background
-            asyncio.create_task(self._execute_motivated_workflow_from_context(execution_context))
+            # Track the workflow with orchestrator object for execution
+            self.active_motivated_workflows[thought_tree_id] = {
+                'orchestrator': orchestrator,
+                'task_id': task_context.task_id,
+                'thought_tree_id': thought_tree_id,
+                'workflow_input': workflow_input
+            }
+
+            # Execute workflow in background using working execution method
+            asyncio.create_task(self._execute_motivated_workflow(workflow_input, self.active_motivated_workflows[thought_tree_id]))
             
             logger.info(f"Successfully spawned motivated workflow for task {task_context.task_id}")
             
@@ -667,9 +672,9 @@ class MotivationalOrchestratorIntegration:
                 
                 if orchestrator_result.error_message:
                     metadata_update['error_message'] = orchestrator_result.error_message
-                
-                update_data['metadata'] = metadata_update
-                
+
+                update_data['metadata_'] = metadata_update
+
                 # Execute update
                 await session.execute(
                     update(ThoughtTree)

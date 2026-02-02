@@ -27,6 +27,10 @@ debug_*.py
 *.swp
 *.swo
 
+# Claude Code
+.clawdhub/
+.claude/
+
 # Logs
 *.log
 logs/

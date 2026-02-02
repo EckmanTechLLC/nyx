@@ -9,22 +9,117 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any
+from contextlib import asynccontextmanager
 
 from .core.exceptions import NYXAPIException, nyx_exception_handler
 from .middleware.auth import APIKeyMiddleware
+from database.connection import db_manager
+from database.models import MotivationalTask, ThoughtTree, Agent
+from sqlalchemy import update
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Import routers
-from .api.v1 import system, orchestrator, motivational
+from .api.v1 import system, orchestrator, motivational, social
 # Additional routers will be imported as they are created:
 # from .api.v1 import tools, llm
 
+
+async def cleanup_orphaned_resources():
+    """
+    Clean up orphaned resources from previous runs on startup.
+
+    Marks all in-progress tasks, thought trees, and agents as cancelled/terminated
+    since they cannot be resumed after a restart.
+    """
+    try:
+        logger.info("Starting orphaned resource cleanup...")
+
+        async with db_manager.get_async_session() as session:
+            cleanup_timestamp = datetime.now(timezone.utc)
+
+            # 1. Clean up MotivationalTasks
+            result = await session.execute(
+                update(MotivationalTask)
+                .where(MotivationalTask.status.in_(['queued', 'spawned', 'active']))
+                .values(
+                    status='cancelled',
+                    completed_at=cleanup_timestamp,
+                    context=MotivationalTask.context.op('||')({
+                        'cancelled_reason': 'startup_cleanup',
+                        'cancelled_at': cleanup_timestamp.isoformat()
+                    })
+                )
+            )
+            tasks_cleaned = result.rowcount
+
+            # 2. Clean up ThoughtTrees
+            result = await session.execute(
+                update(ThoughtTree)
+                .where(ThoughtTree.status.in_(['pending', 'in_progress']))
+                .values(
+                    status='cancelled',
+                    completed_at=cleanup_timestamp,
+                    metadata_=ThoughtTree.metadata_.op('||')({
+                        'cancelled_reason': 'startup_cleanup',
+                        'cancelled_at': cleanup_timestamp.isoformat()
+                    })
+                )
+            )
+            trees_cleaned = result.rowcount
+
+            # 3. Clean up Agents
+            result = await session.execute(
+                update(Agent)
+                .where(Agent.status.in_(['spawned', 'active', 'waiting']))
+                .values(
+                    status='terminated',
+                    completed_at=cleanup_timestamp,
+                    state=Agent.state.op('||')({
+                        'terminated_reason': 'startup_cleanup',
+                        'terminated_at': cleanup_timestamp.isoformat()
+                    })
+                )
+            )
+            agents_cleaned = result.rowcount
+
+            await session.commit()
+
+            logger.info(
+                f"Startup cleanup complete: "
+                f"{tasks_cleaned} tasks, "
+                f"{trees_cleaned} thought trees, "
+                f"{agents_cleaned} agents marked as cancelled/terminated"
+            )
+
+    except Exception as e:
+        logger.error(f"Error during startup cleanup: {e}", exc_info=True)
+        # Don't fail startup if cleanup fails
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    FastAPI lifespan handler for startup and shutdown events.
+
+    Startup: Clean up orphaned resources from previous runs
+    Shutdown: Currently no cleanup needed (engine stops via API)
+    """
+    # Startup
+    await cleanup_orphaned_resources()
+
+    yield
+
+    # Shutdown
+    logger.info("NYX API shutting down...")
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title="NYX Autonomous Agent API",
     description="""
     REST API for NYX autonomous orchestration system.
@@ -57,9 +152,11 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000", 
+        "http://localhost:3000",
         "http://localhost:8080",
-        "http://127.0.0.1:3000"
+        "http://127.0.0.1:3000",
+        "http://192.168.50.13:3000",
+        "http://192.168.50.13:8000"
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
@@ -130,6 +227,7 @@ async def root():
 app.include_router(system.router, prefix="/api/v1/system", tags=["system"])
 app.include_router(orchestrator.router, prefix="/api/v1/orchestrator", tags=["orchestrator"])
 app.include_router(motivational.router, prefix="/api/v1/motivational", tags=["motivational"])
+app.include_router(social.router, prefix="/api/v1/social", tags=["social"])
 
 # Additional routers will be included as they are created:
 # app.include_router(tools.router, prefix="/api/v1/tools", tags=["tools"])

@@ -10,13 +10,15 @@ from .task import TaskAgent
 from .council import CouncilAgent
 from .validator import ValidatorAgent
 from .memory import MemoryAgent
+from .claim_validator import ClaimValidatorAgent
 
 __all__ = [
     'BaseAgent',
-    'AgentState', 
+    'AgentState',
     'AgentResult',
     'TaskAgent',
     'CouncilAgent',
     'ValidatorAgent',
-    'MemoryAgent'
+    'MemoryAgent',
+    'ClaimValidatorAgent'
 ]

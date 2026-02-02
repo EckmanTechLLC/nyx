@@ -31,7 +31,7 @@ class MotivationalModelEngine:
         self,
         evaluation_interval: float = 30.0,  # seconds
         max_concurrent_motivated_tasks: int = 3,
-        min_arbitration_threshold: float = 0.3,
+        min_arbitration_threshold: float = 0.05,
         safety_enabled: bool = True,
         test_mode: bool = False
     ):
@@ -60,10 +60,19 @@ class MotivationalModelEngine:
         if self._running:
             logger.warning("MotivationalModelEngine already running")
             return
-            
+
         self._running = True
         self._startup_time = datetime.now(timezone.utc)
         self._task = asyncio.create_task(self._run_evaluation_loop())
+
+        # Add done callback to catch exceptions
+        def task_done_callback(task):
+            try:
+                task.result()
+            except Exception as e:
+                logger.error(f"Evaluation loop task failed: {e}", exc_info=True)
+
+        self._task.add_done_callback(task_done_callback)
         logger.info("MotivationalModelEngine daemon started")
 
     async def stop(self):
@@ -83,15 +92,20 @@ class MotivationalModelEngine:
 
     async def _run_evaluation_loop(self):
         """Main evaluation loop that runs continuously"""
+        logger.info(f"TRACE: Evaluation loop starting, _running={self._running}")
         try:
             while self._running:
+                logger.info(f"TRACE: Entering evaluation cycle, _running={self._running}")
                 try:
+                    logger.info("TRACE: About to call _evaluate_and_act()")
                     await self._evaluate_and_act()
+                    logger.info(f"TRACE: Evaluation complete, sleeping for {self.evaluation_interval}s")
                     await asyncio.sleep(self.evaluation_interval)
                 except Exception as e:
                     logger.error(f"Error in motivation evaluation cycle: {e}", exc_info=True)
                     # Continue running despite errors, but with exponential backoff
                     await asyncio.sleep(min(self.evaluation_interval * 2, 300))
+            logger.info("TRACE: Exited while loop, _running=False")
         except asyncio.CancelledError:
             logger.info("Motivational evaluation loop cancelled")
         except Exception as e:
@@ -99,9 +113,12 @@ class MotivationalModelEngine:
 
     async def _evaluate_and_act(self):
         """Single evaluation cycle: update states, arbitrate goals, spawn tasks"""
+        logger.info("TRACE: _evaluate_and_act() called")
         start_time = time.time()
-        
+
+        logger.info("TRACE: Getting database session")
         async with self.db_manager.get_async_session() as session:
+            logger.info("TRACE: Got database session, starting evaluation")
             try:
                 # 1. Update motivational states based on system state
                 await self._update_motivational_states(session)
@@ -163,6 +180,7 @@ class MotivationalModelEngine:
             await self._check_maximize_coverage(session)
             await self._check_revisit_old_thoughts(session)
             await self._check_idle_exploration(session)
+            await self._check_monitor_social_network(session)
             
         except Exception as e:
             logger.error(f"Error updating motivational states: {e}")
@@ -337,6 +355,63 @@ class MotivationalModelEngine:
                 
         except Exception as e:
             logger.error(f"Error checking idle state: {e}")
+
+    async def _check_monitor_social_network(self, session: AsyncSession):
+        """Check social network monitoring with cooldown enforcement"""
+        try:
+            # Get the monitor_social_network motivation state
+            result = await session.execute(
+                select(MotivationalState)
+                .where(MotivationalState.motivation_type == 'monitor_social_network')
+            )
+            state = result.scalar_one_or_none()
+
+            if not state:
+                return
+
+            # Check cooldown from metadata
+            last_execution_time = None
+            if state.metadata_ and 'last_execution_time' in state.metadata_:
+                last_execution_str = state.metadata_['last_execution_time']
+                last_execution_time = datetime.fromisoformat(last_execution_str)
+
+            current_time = datetime.now(timezone.utc)
+            cooldown_minutes = 5  # 5 minute cooldown as configured
+
+            # If we have a last execution time, check cooldown
+            if last_execution_time:
+                time_since_last = (current_time - last_execution_time).total_seconds() / 60
+
+                if time_since_last < cooldown_minutes:
+                    # Still in cooldown - don't boost urgency
+                    logger.debug(f"Social monitoring in cooldown: {time_since_last:.1f}/{cooldown_minutes} minutes")
+                    return
+                else:
+                    # Cooldown expired - boost urgency to trigger next check
+                    urgency_boost = 0.3
+                    await self.state_manager.boost_motivation(
+                        session,
+                        'monitor_social_network',
+                        urgency_boost,
+                        {
+                            'minutes_since_last_check': time_since_last,
+                            'cooldown_expired': True
+                        }
+                    )
+                    logger.info(f"Social monitoring cooldown expired ({time_since_last:.1f} min), boosting urgency")
+            else:
+                # No last execution time - initial state, give moderate boost
+                urgency_boost = 0.2
+                await self.state_manager.boost_motivation(
+                    session,
+                    'monitor_social_network',
+                    urgency_boost,
+                    {'first_check': True}
+                )
+                logger.info("Social monitoring first check, boosting urgency")
+
+        except Exception as e:
+            logger.error(f"Error checking social network monitoring: {e}")
 
     async def _can_spawn_new_tasks(self, session: AsyncSession) -> bool:
         """Check if we can spawn new motivated tasks based on current load"""

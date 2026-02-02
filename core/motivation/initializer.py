@@ -107,7 +107,7 @@ class MotivationalModelInitializer:
             engine = MotivationalModelEngine(
                 evaluation_interval=30.0,  # 30 seconds between evaluations
                 max_concurrent_motivated_tasks=3,
-                min_arbitration_threshold=0.3,
+                min_arbitration_threshold=0.05,
                 safety_enabled=True
             )
             

@@ -5,7 +5,7 @@ SelfInitiatedTaskSpawner - Routes motivation-driven prompts into recursive archi
 import logging
 from typing import Optional, Dict, Any
 from uuid import uuid4
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from database.connection import db_manager
@@ -24,7 +24,7 @@ class SelfInitiatedTaskSpawner:
     def __init__(self):
         self.db_manager = db_manager
         self.arbitration_engine = GoalArbitrationEngine()
-        
+
         # Prompt templates for different motivation types
         self.prompt_templates = {
             'resolve_unfinished_tasks': self._generate_resolve_unfinished_prompt,
@@ -32,7 +32,8 @@ class SelfInitiatedTaskSpawner:
             'explore_recent_failure': self._generate_explore_failure_prompt,
             'maximize_coverage': self._generate_coverage_prompt,
             'revisit_old_thoughts': self._generate_revisit_thoughts_prompt,
-            'idle_exploration': self._generate_idle_exploration_prompt
+            'idle_exploration': self._generate_idle_exploration_prompt,
+            'monitor_social_network': self._generate_monitor_social_prompt
         }
 
     async def spawn_task(
@@ -85,16 +86,106 @@ class SelfInitiatedTaskSpawner:
             
             session.add(task)
             await session.flush()  # Get the ID
-            
-            # TODO: Integrate with NYX orchestrator to actually spawn the task
-            # For now, we'll mark it as queued and would need orchestrator integration
-            task.status = 'queued'
-            
+
+            # Special handling for monitor_social_network - uses SocialMonitorAgent directly
+            if motivation_state.motivation_type == 'monitor_social_network':
+                task.status = 'spawned'  # Will be executed by agent
+                # Import here to avoid circular dependency
+                from core.agents.social_monitor import SocialMonitorAgent
+                import asyncio
+
+                # Spawn agent in background after commit
+                async def execute_social_monitor():
+                    try:
+                        await asyncio.sleep(0.5)  # Wait for commit
+                        agent = SocialMonitorAgent(thought_tree_id=None)  # No ThoughtTree needed
+                        await agent.initialize()
+                        result = await agent.execute({})
+
+                        # Update task status and apply cooldown
+                        async with self.db_manager.get_async_session() as update_session:
+                            from sqlalchemy import update, select
+
+                            # Update task status
+                            await update_session.execute(
+                                update(MotivationalTask)
+                                .where(MotivationalTask.id == task.id)
+                                .values(
+                                    status='completed' if result.success else 'failed',
+                                    completed_at=datetime.now(timezone.utc),
+                                    context=result.metadata if result.success else {'error': result.error_message}
+                                )
+                            )
+
+                            # Apply cooldown: decrease urgency and record execution time
+                            if result.success:
+                                current_time = datetime.now(timezone.utc)
+
+                                # Get current metadata to update post tracking
+                                from sqlalchemy import select
+                                state_result = await update_session.execute(
+                                    select(MotivationalState)
+                                    .where(MotivationalState.motivation_type == 'monitor_social_network')
+                                )
+                                state = state_result.scalar_one_or_none()
+
+                                # Extract metrics from result
+                                responses_posted = result.metadata.get('responses_posted', 0)
+                                own_post_replies = result.metadata.get('own_post_replies', 0)
+                                comment_replies = result.metadata.get('comment_replies', 0)
+                                total_engagements = responses_posted + own_post_replies + comment_replies
+
+                                # Get existing post tracking or initialize
+                                current_metadata = state.metadata_ or {}
+                                post_tracking = current_metadata.get('post_tracking', {
+                                    'cycles_since_last_post': 0,
+                                    'claims_corrected_since_last_post': 0,
+                                    'last_post_time': None,
+                                    'posts_this_hour': []
+                                })
+
+                                # Increment counters
+                                post_tracking['cycles_since_last_post'] += 1
+                                post_tracking['claims_corrected_since_last_post'] += total_engagements
+
+                                # Clean up old post timestamps (older than 1 hour)
+                                one_hour_ago = (current_time - timedelta(hours=1)).isoformat()
+                                post_tracking['posts_this_hour'] = [
+                                    ts for ts in post_tracking.get('posts_this_hour', [])
+                                    if ts > one_hour_ago
+                                ]
+
+                                await update_session.execute(
+                                    update(MotivationalState)
+                                    .where(MotivationalState.motivation_type == 'monitor_social_network')
+                                    .values(
+                                        urgency=MotivationalState.urgency * 0.5,  # Decrease urgency by factor 0.5
+                                        metadata_=MotivationalState.metadata_.op('||')({
+                                            'last_execution_time': current_time.isoformat(),
+                                            'last_success': True,
+                                            'post_tracking': post_tracking
+                                        })
+                                    )
+                                )
+                                logger.info(f"Applied cooldown to monitor_social_network: decreased urgency, set last_execution_time")
+                                logger.info(f"Post tracking: cycles={post_tracking['cycles_since_last_post']}, claims={post_tracking['claims_corrected_since_last_post']}")
+
+                            await update_session.commit()
+
+                        logger.info(f"SocialMonitorAgent completed for task {task.id}: success={result.success}")
+                    except Exception as e:
+                        logger.error(f"SocialMonitorAgent failed for task {task.id}: {e}", exc_info=True)
+
+                asyncio.create_task(execute_social_monitor())
+            else:
+                # Queue all other tasks for orchestrator integration
+                task.status = 'queued'
+
             logger.info(
                 f"Spawned motivated task for {motivation_state.motivation_type} "
                 f"with priority {task.task_priority:.3f}"
             )
-            
+
             return task
             
         except Exception as e:
@@ -271,6 +362,56 @@ Focus on discovery, learning, and creative exploration rather than routine tasks
         except Exception as e:
             logger.error(f"Error generating idle exploration prompt: {e}")
             return "Engage in self-directed exploration and learning activities to discover new insights and capabilities."
+
+    async def _generate_monitor_social_prompt(self, context: Dict[str, Any]) -> str:
+        """Generate prompt for monitoring social network (Moltbook)"""
+        try:
+            prompt = """AUTONOMOUS TASK: Monitor and Engage with Moltbook Social Network
+
+Fetch recent posts from Moltbook, validate claims made by other AI agents against NYX's real execution outcomes, and respond when appropriate with evidence-based analysis.
+
+**Your task:**
+1. Fetch the 10 most recent hot posts from Moltbook using MoltbookTool
+2. For each post, extract any testable claims about AI capabilities, task execution, or performance
+3. Validate each claim against NYX's execution history using ClaimValidatorAgent
+4. **Determine if the claim warrants a response:**
+   - Contradicted claims: HIGH priority - respond with correcting evidence
+   - Verified claims: MEDIUM priority - acknowledge and provide supporting data
+   - Unverified/untestable: LOW priority - skip or note limitations
+5. **For claims that warrant response, post a comment using MoltbookTool.create_comment():**
+   - Be concise and evidence-based
+   - Reference NYX's execution data (task counts, success rates, metrics)
+   - Be polite and constructive
+   - Include confidence scores when relevant
+
+**What constitutes a claim:**
+- Statements about success rates, performance improvements, or capability assertions
+- Examples: "recursive decomposition improves success by 40%", "autonomous agents can run for days", "LLM caching reduces costs 80%"
+
+**Response guidelines:**
+- MAX 1 comment per post
+- Focus on factual correction or validation
+- No engagement with pure philosophy or memes
+- Never share credentials, PII, or system internals
+- Keep responses under 500 characters
+
+**Tools available:**
+- MoltbookTool: get_posts(), create_comment(post_id, content)
+- ClaimValidatorAgent: validate claims against execution history
+
+**Output:**
+Return a summary of:
+- Number of posts analyzed
+- Number of claims validated
+- Breakdown by validation status (verified/unverified/contradicted/untestable)
+- Number of responses posted
+- Post IDs where comments were made"""
+
+            return prompt
+
+        except Exception as e:
+            logger.error(f"Error generating monitor social prompt: {e}")
+            return "Monitor Moltbook social network and validate AI agent claims against execution data."
 
     async def update_task_status(
         self, 

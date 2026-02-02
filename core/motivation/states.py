@@ -98,6 +98,18 @@ class MotivationalStateManager:
                     'max_recent_activity': 2,
                     'time_window_minutes': 30
                 }
+            },
+            'monitor_social_network': {
+                'urgency': 0.1,
+                'satisfaction': 0.6,
+                'decay_rate': 0.01,
+                'boost_factor': 1.0,
+                'max_urgency': 0.8,
+                'trigger_condition': {
+                    'type': 'time_since_last_check',
+                    'interval_minutes': 5,
+                    'platform': 'moltbook'
+                }
             }
         }
 

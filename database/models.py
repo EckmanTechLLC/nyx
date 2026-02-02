@@ -373,13 +373,46 @@ class MotivationalTask(Base):
     thought_tree = relationship("ThoughtTree")
     
     __table_args__ = (
-        CheckConstraint("status IN ('generated', 'queued', 'spawned', 'active', 'completed', 'failed', 'cancelled')", 
+        CheckConstraint("status IN ('generated', 'queued', 'spawned', 'active', 'completed', 'failed', 'cancelled')",
                        name="check_motivational_tasks_status"),
-        CheckConstraint("task_priority >= 0.0 AND task_priority <= 1.0", 
+        CheckConstraint("task_priority >= 0.0 AND task_priority <= 1.0",
                        name="check_motivational_tasks_priority_range"),
         Index("idx_motivational_tasks_state_id", "motivational_state_id"),
         Index("idx_motivational_tasks_thought_tree_id", "thought_tree_id"),
         Index("idx_motivational_tasks_status", "status"),
         Index("idx_motivational_tasks_priority", "task_priority"),
         Index("idx_motivational_tasks_spawned_at", "spawned_at"),
+    )
+
+
+class SocialClaimValidation(Base):
+    __tablename__ = "social_claim_validations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    # Source information
+    source_platform = Column(String(50), nullable=False)
+    source_post_id = Column(String(255), nullable=False)
+    source_agent_name = Column(String(255), nullable=True)
+
+    # Claim details
+    claim_text = Column(Text, nullable=False)
+    validation_status = Column(String(20), nullable=False)
+    supporting_evidence = Column(JSONB, nullable=True)
+    confidence_score = Column(Float, nullable=True)
+
+    # Validator
+    validator_agent_id = Column(UUID(as_uuid=True), ForeignKey("agents.id", ondelete="SET NULL"), nullable=True)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    validator = relationship("Agent")
+
+    __table_args__ = (
+        Index("idx_social_claim_platform", "source_platform"),
+        Index("idx_social_claim_status", "validation_status"),
+        Index("idx_social_claim_created", "created_at"),
     )

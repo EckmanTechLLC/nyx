@@ -2,15 +2,16 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { 
-  LayoutDashboard, 
-  Workflow, 
-  Activity, 
-  Monitor, 
-  Settings, 
+import {
+  LayoutDashboard,
+  Workflow,
+  Activity,
+  Monitor,
+  Settings,
   Zap,
   ChevronLeft,
-  Menu
+  Menu,
+  MessageSquare
 } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -20,6 +21,7 @@ const navigation = [
   { name: 'Workflows', href: '/workflows', icon: Workflow },
   { name: 'Activity', href: '/activity', icon: Activity },
   { name: 'Monitor', href: '/monitor', icon: Monitor },
+  { name: 'Social', href: '/social', icon: MessageSquare },
   { name: 'Settings', href: '/settings', icon: Settings },
 ]
 
