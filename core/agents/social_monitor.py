@@ -7,7 +7,7 @@ with evidence-based reasoning.
 """
 import logging
 from typing import Dict, Any, Optional, List
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from uuid import uuid4
 
 from .base import BaseAgent, AgentResult
@@ -41,7 +41,8 @@ class SocialMonitorAgent(BaseAgent):
         llm_model: LLMModel = LLMModel.CLAUDE_3_5_HAIKU,
         use_native_caching: bool = True,
         post_limit: int = 10,
-        max_offset: int = 50  # Max posts to paginate before rotating sort
+        max_offset: int = 50,  # Max posts to paginate before rotating sort
+        max_comment_replies_per_run: int = 3  # Rate limit: max comment replies per execution
     ):
         super().__init__(
             agent_type="task",  # Using task type since it's in allowed list
@@ -55,6 +56,7 @@ class SocialMonitorAgent(BaseAgent):
 
         self.post_limit = post_limit
         self.max_offset = max_offset
+        self.max_comment_replies_per_run = max_comment_replies_per_run
         self.moltbook = None
         self.sort_strategies = ['hot', 'new', 'rising']
 
@@ -502,11 +504,12 @@ Should NYX respond to correct/ground this post?"""
 
                 # Get full post with comments
                 full_post = self.moltbook.get_post(post_id)
-                comments = full_post.get('post', {}).get('comments', [])
+                comments = full_post.get('comments', [])
 
                 # Process comments recursively (handles nested replies)
                 await self._process_comments_recursive(
-                    post_id, comments, results, evaluate_for='reply'
+                    post_id, comments, results, evaluate_for='reply',
+                    max_replies=self.max_comment_replies_per_run
                 )
 
         except Exception as e:
@@ -522,19 +525,20 @@ Should NYX respond to correct/ground this post?"""
         }
 
         try:
-            # Check comments on a subset of posts (top 5 to avoid overwhelming)
-            for post in posts[:5]:
+            # Check comments on a subset of posts (reduced to 2 to limit LLM calls)
+            for post in posts[:2]:
                 post_id = post.get('id')
                 if not post_id:
                     continue
 
                 # Get full post with comments
                 full_post = self.moltbook.get_post(post_id)
-                comments = full_post.get('post', {}).get('comments', [])
+                comments = full_post.get('comments', [])
 
                 # Process comments recursively (handles nested replies)
                 await self._process_comments_recursive(
-                    post_id, comments, results, evaluate_for='claim'
+                    post_id, comments, results, evaluate_for='claim',
+                    max_replies=self.max_comment_replies_per_run
                 )
 
         except Exception as e:
@@ -547,28 +551,40 @@ Should NYX respond to correct/ground this post?"""
         post_id: str,
         comments: List[Dict[str, Any]],
         results: Dict[str, Any],
-        evaluate_for: str  # 'reply' or 'claim'
+        evaluate_for: str,  # 'reply' or 'claim'
+        max_replies: Optional[int] = None  # Rate limit for this execution
     ):
         """Recursively process comments and nested replies"""
+        # Check if we've hit the reply limit
+        if max_replies is not None and results.get('replies_posted', 0) >= max_replies:
+            logger.info(f"Reply limit reached ({max_replies}), stopping comment processing")
+            return
+
         for comment in comments:
             comment_id = comment.get('id')
             comment_content = comment.get('content', '')
             author_name = comment.get('author', {}).get('name', 'unknown')
 
+            # Skip old comments (only process comments from last 4 hours)
+            if not self._is_comment_recent(comment, hours=4):
+                logger.debug(f"Skipping old comment {comment_id}")
+                continue
+
             # Always process nested replies first (to catch new replies in threads)
             nested_replies = comment.get('replies', [])
             if nested_replies:
-                await self._process_comments_recursive(post_id, nested_replies, results, evaluate_for)
+                await self._process_comments_recursive(post_id, nested_replies, results, evaluate_for, max_replies)
 
             # Skip evaluation if no content or if it's NYX's own comment
             if not comment_content or author_name == 'TheRealNyx':
+                logger.debug(f"Skipping comment {comment_id}: no content or own comment (author={author_name})")
                 continue
 
             results['comments_checked'] += 1
 
-            # Check if we already replied to THIS specific comment
-            # But we still checked nested replies above, so we can engage in ongoing threads
-            if self._already_replied_to_comment(comment_id):
+            # Check if we already evaluated THIS comment (saves LLM calls!)
+            if self._already_evaluated_comment(comment_id):
+                logger.debug(f"Already evaluated comment {comment_id}, skipping")
                 continue
 
             # Evaluate based on type
@@ -581,16 +597,23 @@ Should NYX respond to correct/ground this post?"""
                     comment_id, author_name, comment_content
                 )
 
+            # Store the evaluation (even if we don't respond) to avoid re-evaluating
+            self._store_comment_evaluation(comment_id, evaluation.get('should_respond', False))
+
             # Post reply if warranted
             if evaluation.get('should_respond'):
-                reply_posted = await self._post_comment_reply(
-                    post_id, comment_id, evaluation['response_text']
-                )
+                # Double-check we're not replying to our own comment (safety check)
+                if author_name != 'TheRealNyx':
+                    reply_posted = await self._post_comment_reply(
+                        post_id, comment_id, evaluation['response_text']
+                    )
 
-                if reply_posted:
-                    results['replies_posted'] += 1
-                    self._mark_comment_replied(comment_id, evaluation['response_text'])
-                    logger.info(f"Replied to comment {comment_id} ({evaluate_for})")
+                    if reply_posted:
+                        results['replies_posted'] += 1
+                        self._mark_comment_replied(comment_id, post_id, evaluation['response_text'])
+                        logger.info(f"Replied to comment {comment_id} ({evaluate_for})")
+                else:
+                    logger.warning(f"Evaluation wanted to reply to NYX's own comment {comment_id}, blocked!")
 
     async def _evaluate_comment_for_reply(
         self,
@@ -600,24 +623,26 @@ Should NYX respond to correct/ground this post?"""
     ) -> Dict[str, Any]:
         """Evaluate if a comment on NYX's post warrants a reply"""
 
-        system_prompt = """You are NYX, responding to comments on your own posts.
+        system_prompt = """You are NYX, the reality-check agent responding to comments on your own posts.
 
-Decide if this comment warrants a reply. Reply when:
-- They ask a genuine question that deserves clarification
-- They make a substantive counterargument worth engaging
-- They misunderstand your point and correction would be valuable
-- They raise interesting points that advance the discussion
+Maintain your critical, evidence-based persona. Reply ONLY when:
+- They make claims requiring correction with evidence
+- They ask questions where the answer challenges assumptions
+- They present flawed reasoning worth dismantling
+- They misunderstand and need direct correction
 
 DO NOT reply to:
-- Spam or memes
-- Generic responses like "interesting perspective"
-- Comments that don't engage with substance
+- Spam, memes, or promotional content
+- Vague agreement or empty praise
+- Comments that don't make testable claims
 - Trolling or bad-faith arguments
 
 Your replies should be:
-- Direct and concise (under 300 characters)
-- Substantive - add new information or clarification
-- Grounded in evidence or clear reasoning
+- Direct and challenging (under 300 characters)
+- Demand evidence for unsupported claims
+- Point out logical flaws or false assumptions
+- Grounded in measurable outcomes, not speculation
+- Critical, not agreeable or encouraging
 
 Output format (STRICT - do not add any commentary after RESPONSE):
 SHOULD_RESPOND: yes/no
@@ -807,7 +832,78 @@ Does this contain claims worth correcting?"""
             logger.error(f"Error checking comment reply status: {e}")
             return False
 
-    def _mark_comment_replied(self, comment_id: str, response_text: str = ''):
+    def _already_evaluated_comment(self, comment_id: str) -> bool:
+        """Check if we already evaluated this comment (replied or not)"""
+        try:
+            session = get_sync_session()
+
+            # Check if we have ANY record of evaluating this comment
+            # Use only moltbook_comment platform, differentiate by validation_status
+            existing = session.query(SocialClaimValidation).filter(
+                SocialClaimValidation.source_post_id == comment_id,
+                SocialClaimValidation.source_platform == 'moltbook_comment'
+            ).first()
+
+            session.close()
+            return existing is not None
+
+        except Exception as e:
+            logger.error(f"Error checking comment evaluation status: {e}")
+            return False
+
+    def _is_comment_recent(self, comment: Dict[str, Any], hours: int = 4) -> bool:
+        """Check if comment was created within the last N hours"""
+        try:
+            created_at_str = comment.get('created_at')
+            if not created_at_str:
+                return True  # If no timestamp, assume recent to be safe
+
+            # Parse ISO timestamp
+            created_at = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+
+            return created_at > cutoff
+
+        except Exception as e:
+            logger.debug(f"Error checking comment age: {e}")
+            return True  # If error parsing, assume recent to be safe
+
+    def _store_comment_evaluation(self, comment_id: str, should_respond: bool):
+        """Store that we evaluated this comment (prevents re-evaluation)"""
+        try:
+            session = get_sync_session()
+
+            # Only store if not already stored
+            existing = session.query(SocialClaimValidation).filter(
+                SocialClaimValidation.source_post_id == comment_id,
+                SocialClaimValidation.source_platform == 'moltbook_comment'
+            ).first()
+
+            if not existing:
+                # Use 'untestable' status for evaluated-but-not-responded
+                # Use 'contradicted' status when we actually reply (handled in _mark_comment_replied)
+                validation = SocialClaimValidation(
+                    id=uuid4(),
+                    source_platform='moltbook_comment',
+                    source_post_id=comment_id,
+                    source_agent_name='evaluation_only',
+                    claim_text='Comment evaluated - no response needed',
+                    validation_status='untestable',
+                    supporting_evidence={
+                        'should_respond': should_respond,
+                        'evaluated_at': datetime.now(timezone.utc).isoformat()
+                    },
+                    confidence_score=0.0
+                )
+                session.add(validation)
+                session.commit()
+
+            session.close()
+
+        except Exception as e:
+            logger.error(f"Error storing comment evaluation: {e}")
+
+    def _mark_comment_replied(self, comment_id: str, post_id: str, response_text: str = ''):
         """Mark a comment as replied to"""
         try:
             session = get_sync_session()
@@ -820,7 +916,8 @@ Does this contain claims worth correcting?"""
                 claim_text='Comment reply',
                 validation_status='contradicted',  # Changed to contradicted since we actually replied
                 supporting_evidence={
-                    'response_text': response_text
+                    'response_text': response_text,
+                    'post_id': post_id  # Store the actual post ID for URL generation
                 },
                 confidence_score=1.0
             )

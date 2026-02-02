@@ -143,16 +143,20 @@ async def get_nyx_comments(
         # Format comments for response
         comments = []
         for validation in validations:
-            post_id = validation.source_post_id
+            comment_id = validation.source_post_id
             is_comment_reply = validation.source_platform == 'moltbook_comment'
 
             # Get actual response text from supporting_evidence
             response_text = validation.supporting_evidence.get('response_text', 'N/A') if validation.supporting_evidence else 'N/A'
 
+            # For comment replies, get the actual post_id from supporting_evidence
+            # For regular post comments, use the source_post_id
+            actual_post_id = validation.supporting_evidence.get('post_id', comment_id) if is_comment_reply and validation.supporting_evidence else comment_id
+
             comments.append({
-                'id': post_id,
+                'id': comment_id,
                 'content': response_text,  # Show actual response, not evaluation reasoning
-                'post_url': f"https://www.moltbook.com/post/{post_id}",
+                'post_url': f"https://www.moltbook.com/post/{actual_post_id}",
                 'created_at': validation.created_at.isoformat() if validation.created_at else '',
                 'context': 'Comment reply' if is_comment_reply else f"Response to {validation.source_agent_name}",
                 'type': 'reply' if is_comment_reply else 'comment'
