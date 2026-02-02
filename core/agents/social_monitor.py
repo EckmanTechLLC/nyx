@@ -959,20 +959,30 @@ Does this contain claims worth correcting?"""
 
             logger.info(f"Post creation check: cycles={cycles}, claims={claims}, posts_this_hour={len(posts_this_hour)}")
 
-            # Check thresholds (5 cycles OR 8+ claims corrected)
-            threshold_met = cycles >= 5 or claims >= 8
+            # Check thresholds (8 cycles OR 12+ claims corrected) - increased to reduce frequency
+            threshold_met = cycles >= 8 or claims >= 12
 
             if not threshold_met:
                 logger.debug("Post creation thresholds not met")
                 return results
 
-            # Check frequency limit (max 2 posts per hour)
-            if len(posts_this_hour) >= 2:
-                logger.info("Post creation frequency limit reached (2/hour)")
+            # Check frequency limit (max 1 post per 2 hours) - reduced to prevent duplicates
+            # Filter posts from last 2 hours
+            cutoff_time = datetime.now(timezone.utc) - timedelta(hours=2)
+            recent_posts = [
+                post_time for post_time in posts_this_hour
+                if datetime.fromisoformat(post_time) > cutoff_time
+            ]
+
+            if len(recent_posts) >= 1:
+                logger.info("Post creation frequency limit reached (1 per 2 hours)")
                 return results
 
-            # Generate post content using LLM
-            post_content = await self._generate_post_content(cycles, claims, evaluation_results)
+            # Get recent posts to avoid duplicates
+            recent_posts = self._get_recent_nyx_posts(limit=5)
+
+            # Generate post content using LLM (with context about recent posts)
+            post_content = await self._generate_post_content(cycles, claims, evaluation_results, recent_posts)
 
             if not post_content or not post_content.get('should_post'):
                 logger.info("LLM decided not to create post")
@@ -996,11 +1006,30 @@ Does this contain claims worth correcting?"""
 
         return results
 
+    def _get_recent_nyx_posts(self, limit: int = 5) -> List[Dict[str, Any]]:
+        """Get recent posts by NYX to avoid duplicate topics"""
+        try:
+            profile_data = self.moltbook.get_agent_profile('TheRealNyx')
+            recent_posts = profile_data.get('recentPosts', [])[:limit]
+
+            # Extract title and timestamp
+            return [
+                {
+                    'title': post.get('title', 'Untitled'),
+                    'created_at': post.get('created_at', '')
+                }
+                for post in recent_posts
+            ]
+        except Exception as e:
+            logger.warning(f"Could not fetch recent posts: {e}")
+            return []
+
     async def _generate_post_content(
         self,
         cycles: int,
         claims: int,
-        evaluation_results: Dict[str, Any]
+        evaluation_results: Dict[str, Any],
+        recent_posts: List[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Use LLM to generate original post content"""
 
@@ -1023,16 +1052,27 @@ TITLE: [post title, under 200 chars]
 CONTENT: [post content, can be short observation or longer analysis]
 REASONING: [why this is worth posting, or why not]"""
 
-        user_prompt = f"""You've completed {cycles} monitoring cycles and corrected/engaged with {claims} posts/comments.
+        # Build context about recent posts
+        recent_posts_context = ""
+        if recent_posts:
+            post_list = "\n".join([f"- \"{p['title']}\"" for p in recent_posts])
+            recent_posts_context = f"""
+Your recent posts (DO NOT repeat these topics):
+{post_list}
 
-Based on your recent observations on Moltbook, do you have something worth posting about?
+CRITICAL: Check if your new post would be too similar to any of the above. If so, say SHOULD_POST: no
+"""
+
+        user_prompt = f"""You've completed {cycles} monitoring cycles and corrected/engaged with {claims} posts/comments.
+{recent_posts_context}
+Based on your recent observations on Moltbook, do you have something NEW and DIFFERENT worth posting about?
 
 Recent activity summary:
 - Evaluated posts for false claims
 - Engaged in comment discussions
 - Corrected misinformation
 
-Should you create an original post? If yes, what should it be about?"""
+Should you create an original post? If yes, what should it be about that you haven't already covered?"""
 
         try:
             result = await self._call_llm(
